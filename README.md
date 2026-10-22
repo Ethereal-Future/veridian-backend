@@ -12,7 +12,9 @@ The API does not custody funds and does not claim that an intent is a completed 
 - `GET /projects` returns project progress and milestone summaries.
 - `GET /projects/:id` returns one project or `project_not_found`.
 - `GET /projects/:id/milestones` returns public milestone data.
+- `POST /projects` validates and initializes a new project with an empty milestone list.
 - `POST /projects/:id/contributions` validates positive amounts, optional wallet values, and idempotency keys before recording an in-memory intent.
+- `GET /projects/:id/contributions` exposes contribution intents for the project read model.
 - Consistent JSON responses, CORS preflight handling, bounded request bodies, and explicit error codes.
 
 ## Architecture
@@ -23,7 +25,17 @@ Browser / wallet adapter -> HTTP API -> validation -> intent store -> future ind
                                                 +-> project read model  +-> network reconciliation
 ```
 
-The current store is in memory so the prototype is easy to inspect. A future persistence issue should define schema, migrations, replay behavior, and idempotency semantics before a database is introduced.
+The current store is initialized with three domain projects at process startup and kept behind `src/store.js`. A future persistence issue should define schema, migrations, replay behavior, and idempotency semantics before a database is introduced.
+
+## Start locally
+
+```bash
+npm start
+# Veridian API listens on http://localhost:3001
+curl http://localhost:3001/health
+```
+
+All routes also accept the `/api/v1` prefix. Set `PORT`, `SERVICE_NAME`, and `MAX_BODY_BYTES` through the environment or copy `.env.example` into your local configuration.
 
 ## Example
 

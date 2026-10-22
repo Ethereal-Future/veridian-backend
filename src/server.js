@@ -1,40 +1,62 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
+import { createStore } from './store.js';
 
-const projects = [
-  { id: 'commons-index', name: 'Commons Index', category: 'Infrastructure', summary: 'A public catalog for reusable community infrastructure.', goal: 12000, raised: 7200, milestones: [{ id: 'model', title: 'Publish the data model', complete: true }, { id: 'directory', title: 'Release the public directory', complete: true }, { id: 'verify', title: 'Add community verification', complete: false }] },
-  { id: 'open-orchard', name: 'Open Orchard', category: 'Climate', summary: 'Track local food-growing projects with transparent milestones.', goal: 9400, raised: 9400, milestones: [{ id: 'map', title: 'Map participating gardens', complete: true }, { id: 'reports', title: 'Publish seasonal reports', complete: true }] },
-  { id: 'learning-lantern', name: 'Learning Lantern', category: 'Education', summary: 'Fund open learning modules with clear release plans.', goal: 10000, raised: 3100, milestones: [{ id: 'research', title: 'Interview local educators', complete: true }, { id: 'module', title: 'Publish the first module', complete: false }] },
-];
-const contributions = new Map();
-function send(res, status, payload) { res.writeHead(status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*' }); res.end(JSON.stringify(payload)); }
-function readJson(req) { return new Promise((resolve, reject) => { let raw = ''; req.on('data', (chunk) => { raw += chunk; if (raw.length > 16_384) reject(new Error('payload_too_large')); }); req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error('invalid_json')); } }); req.on('error', reject); }); }
-function projectResponse(project) { return { ...project, progress: Math.min(100, Math.round((project.raised / project.goal) * 100)), milestoneCount: project.milestones.length, completedMilestones: project.milestones.filter((item) => item.complete).length }; }
+const port = Number(process.env.PORT || 3001);
+const serviceName = process.env.SERVICE_NAME || 'veridian-backend';
+const maxBodyBytes = Number(process.env.MAX_BODY_BYTES || 16_384);
+const store = createStore();
+
+function headers(requestId) {
+  return { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store', 'access-control-allow-origin': '*', 'access-control-expose-headers': 'x-request-id', 'x-request-id': requestId };
+}
+function send(res, status, payload, requestId) { res.writeHead(status, headers(requestId)); res.end(JSON.stringify(payload)); }
+function readJson(req) {
+  return new Promise((resolve, reject) => {
+    let raw = '';
+    req.on('data', (chunk) => { raw += chunk; if (raw.length > maxBodyBytes) reject(new Error('payload_too_large')); });
+    req.on('end', () => { try { resolve(raw ? JSON.parse(raw) : {}); } catch { reject(new Error('invalid_json')); } });
+    req.on('error', reject);
+  });
+}
+function validProjectInput(body) {
+  const id = String(body.id || '').trim();
+  const name = String(body.name || '').trim();
+  const category = String(body.category || '').trim();
+  const summary = String(body.summary || '').trim();
+  const goal = Number(body.goal);
+  if (!/^[a-z0-9-]{3,48}$/.test(id) || !name || !category || !summary || !Number.isFinite(goal) || goal <= 0) throw new Error('project_fields_invalid');
+  return { id, name, category, summary, goal };
+}
 
 const server = createServer(async (req, res) => {
+  const requestId = req.headers['x-request-id'] || randomUUID();
   const url = new URL(req.url, 'http://localhost');
-  if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type,idempotency-key' }); return res.end(); }
-  if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { status: 'ok', service: 'veridian-backend', version: '0.2.0', timestamp: new Date().toISOString() });
-  if (req.method === 'GET' && url.pathname === '/projects') return send(res, 200, { projects: projects.map(projectResponse) });
-  const projectMatch = url.pathname.match(/^\/projects\/([^/]+)$/);
-  if (req.method === 'GET' && projectMatch) { const project = projects.find((item) => item.id === projectMatch[1]); return project ? send(res, 200, { project: projectResponse(project) }) : send(res, 404, { error: 'project_not_found' }); }
-  const milestoneMatch = url.pathname.match(/^\/projects\/([^/]+)\/milestones$/);
-  if (req.method === 'GET' && milestoneMatch) { const project = projects.find((item) => item.id === milestoneMatch[1]); return project ? send(res, 200, { projectId: project.id, milestones: project.milestones }) : send(res, 404, { error: 'project_not_found' }); }
-  const contributionMatch = url.pathname.match(/^\/projects\/([^/]+)\/contributions$/);
-  if (req.method === 'POST' && contributionMatch) {
-    try {
-      const project = projects.find((item) => item.id === contributionMatch[1]);
-      if (!project) return send(res, 404, { error: 'project_not_found' });
-      const key = req.headers['idempotency-key'];
-      if (key && contributions.has(`${project.id}:${key}`)) return send(res, 200, { contribution: contributions.get(`${project.id}:${key}`), replayed: true });
-      const body = await readJson(req); const amount = Number(body.amount);
-      if (!Number.isFinite(amount) || amount <= 0) return send(res, 400, { error: 'amount_must_be_positive' });
-      if (body.wallet !== undefined && (typeof body.wallet !== 'string' || body.wallet.length < 3)) return send(res, 400, { error: 'wallet_format_invalid' });
-      const record = { id: `intent_${randomUUID()}`, projectId: project.id, amount, wallet: body.wallet ?? null, status: 'awaiting_signature', createdAt: new Date().toISOString() };
-      if (key) contributions.set(`${project.id}:${key}`, record);
-      return send(res, 201, { contribution: record, next: 'sign_and_submit_with_wallet' });
-    } catch (error) { return send(res, 400, { error: error.message }); }
+  const path = url.pathname.replace(/^\/api\/v1/, '') || '/';
+  if (req.method === 'OPTIONS') { res.writeHead(204, { ...headers(requestId), 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type,idempotency-key,x-request-id' }); return res.end(); }
+  if (req.method === 'GET' && path === '/health') return send(res, 200, { status: 'ok', service: serviceName, version: '0.3.0', projectCount: store.listProjects().length, timestamp: new Date().toISOString() }, requestId);
+  if (req.method === 'GET' && path === '/projects') return send(res, 200, { projects: store.listProjects() }, requestId);
+  if (req.method === 'POST' && path === '/projects') {
+    try { return send(res, 201, { project: store.createProject(validProjectInput(await readJson(req))) }, requestId); } catch (error) { return send(res, 400, { error: error.message }, requestId); }
   }
-  return send(res, 404, { error: 'not_found' });
+  const projectMatch = path.match(/^\/projects\/([^/]+)$/);
+  if (req.method === 'GET' && projectMatch) { const project = store.findProject(projectMatch[1]); return project ? send(res, 200, { project }, requestId) : send(res, 404, { error: 'project_not_found' }, requestId); }
+  const milestoneMatch = path.match(/^\/projects\/([^/]+)\/milestones$/);
+  if (req.method === 'GET' && milestoneMatch) { const project = store.findProject(milestoneMatch[1]); return project ? send(res, 200, { projectId: project.id, milestones: project.milestones }, requestId) : send(res, 404, { error: 'project_not_found' }, requestId); }
+  const contributionMatch = path.match(/^\/projects\/([^/]+)\/contributions$/);
+  if ((req.method === 'GET' || req.method === 'POST') && contributionMatch) {
+    const project = store.findProject(contributionMatch[1]);
+    if (!project) return send(res, 404, { error: 'project_not_found' }, requestId);
+    if (req.method === 'GET') return send(res, 200, { projectId: project.id, contributions: store.listContributions(project.id) }, requestId);
+    try {
+      const body = await readJson(req); const amount = Number(body.amount);
+      if (!Number.isFinite(amount) || amount <= 0) return send(res, 400, { error: 'amount_must_be_positive' }, requestId);
+      if (body.wallet !== undefined && (typeof body.wallet !== 'string' || body.wallet.length < 3)) return send(res, 400, { error: 'wallet_format_invalid' }, requestId);
+      const { record, replayed } = store.createContribution(project, { amount, wallet: body.wallet }, req.headers['idempotency-key']);
+      return send(res, replayed ? 200 : 201, { contribution: record, replayed, next: 'sign_and_submit_with_wallet' }, requestId);
+    } catch (error) { return send(res, 400, { error: error.message }, requestId); }
+  }
+  return send(res, 404, { error: 'not_found', path }, requestId);
 });
-const port = Number(process.env.PORT || 3001); server.listen(port, () => console.log(`Veridian API listening on :${port}`));
+
+server.listen(port, () => console.log(`${serviceName} listening on http://localhost:${port}`));
