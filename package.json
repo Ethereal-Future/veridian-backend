@@ -1,9 +1,9 @@
 {
-  "name": "@viridian/backend",
+  "name": "@veridian/backend",
   "version": "0.1.0",
   "private": false,
   "type": "module",
-  "description": "Transparent project and contribution-intent API for Viridian",
+  "description": "Transparent project and contribution-intent API for Veridian",
   "scripts": { "start": "node src/server.js" },
   "engines": { "node": ">=20" }
 }

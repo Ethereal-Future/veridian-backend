@@ -1,6 +1,6 @@
-# Viridian Backend
+# Veridian Backend
 
-Viridian Backend is an original API for publishing public-good project metadata and recording transparent contribution intents. It keeps domain rules visible and framework-light so persistence, wallet verification, and indexing can be introduced as focused contributions.
+Veridian Backend is an original API for publishing public-good project metadata and recording transparent contribution intents. It keeps domain rules visible and framework-light so persistence, wallet verification, and indexing can be introduced as focused contributions.
 
 ## Product boundary
 

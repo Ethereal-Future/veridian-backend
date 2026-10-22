@@ -14,7 +14,7 @@ function projectResponse(project) { return { ...project, progress: Math.min(100,
 const server = createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
   if (req.method === 'OPTIONS') { res.writeHead(204, { 'access-control-allow-origin': '*', 'access-control-allow-methods': 'GET,POST,OPTIONS', 'access-control-allow-headers': 'content-type,idempotency-key' }); return res.end(); }
-  if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { status: 'ok', service: 'viridian-backend', version: '0.2.0', timestamp: new Date().toISOString() });
+  if (req.method === 'GET' && url.pathname === '/health') return send(res, 200, { status: 'ok', service: 'veridian-backend', version: '0.2.0', timestamp: new Date().toISOString() });
   if (req.method === 'GET' && url.pathname === '/projects') return send(res, 200, { projects: projects.map(projectResponse) });
   const projectMatch = url.pathname.match(/^\/projects\/([^/]+)$/);
   if (req.method === 'GET' && projectMatch) { const project = projects.find((item) => item.id === projectMatch[1]); return project ? send(res, 200, { project: projectResponse(project) }) : send(res, 404, { error: 'project_not_found' }); }
@@ -37,4 +37,4 @@ const server = createServer(async (req, res) => {
   }
   return send(res, 404, { error: 'not_found' });
 });
-const port = Number(process.env.PORT || 3001); server.listen(port, () => console.log(`Viridian API listening on :${port}`));
+const port = Number(process.env.PORT || 3001); server.listen(port, () => console.log(`Veridian API listening on :${port}`));
